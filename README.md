@@ -7,8 +7,7 @@ files, or logs into OpenMetrics format on-demand.
 
 Thanks to [Vaisala Xweather](https://xweather.com) for sponsoring development.
 
-[![Vaisala Xweather Logo](https://www.xweather.com/assets/logos/vaisala-xweather-logo-dark.png)](https://xweather.com)
-
+[![Vaisala Xweather Logo](https://www.xweather.com/assets/logos/vaisala-xweather-logo-light-example.svg)](https://xweather.com)
 
 ## Quickstart
 
