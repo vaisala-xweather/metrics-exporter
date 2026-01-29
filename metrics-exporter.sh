@@ -1,19 +1,17 @@
 #!/bin/bash
 set -xeo pipefail
-# Metrics exporter script - outputs hello world with HTTP headers
-# Read the HTTP request (optional, but good practice)
+
 while read -r line; do
     line=$(echo "$line" | tr -d '\r')
     [ -z "$line" ] && break
 done
 
-# Send HTTP response
+# Send HTTP headers
 echo -ne "HTTP/1.1 200 OK\r\n"
 echo -ne "Content-Type: text/plain; charset=utf-8\r\n"
 echo -ne "Connection: close\r\n"
 echo -ne "\r\n"
 
-# Get the directory where this script is located
 NODE_EXPORTER_PLUGINS_DIR="/etc/metrics-exporter/node_exporter-plugins.d"
 PLUGINS_DIR="/etc/metrics-exporter/plugins.d"
 
@@ -47,10 +45,9 @@ function run_node_exporter_plugins() {
 		wait "$pid"
 	done
 
-	# Cat all outputs together
+	# Concatenate all outputs together
 	cat "$tmp_dir"/node_exporter_*.txt 2>/dev/null || true
 
-	# Cleanup
 	rm -rf "$tmp_dir"
 }
 
@@ -81,7 +78,7 @@ function run_plugins() {
 		wait "$pid"
 	done
 
-	# Cat all outputs together
+	# Concatenate all outputs together
 	cat "$tmp_dir"/plugin_*.txt 2>/dev/null || true
 
 	# Cleanup
