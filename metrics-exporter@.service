@@ -1,0 +1,9 @@
+[Unit]
+Description=Metrics Exporter Service
+
+[Service]
+Type=simple
+ExecStart=/opt/metrics-exporter/metrics-exporter.sh
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
