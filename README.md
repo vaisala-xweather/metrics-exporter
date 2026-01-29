@@ -6,8 +6,7 @@ output in [OpenMetrics](https://prometheus.io/docs/specs/om/open_metrics_spec/) 
 files, or logs into OpenMetrics format on-demand.
 
 Thanks to [Vaisala Xweather](https://xweather.com) for sponsoring development.
-
-[![Vaisala Xweather Logo](https://www.xweather.com/assets/logos/vaisala-xweather-logo-light-example.svg)](https://xweather.com)
+<p><img src="https://www.xweather.com/assets/logos/vaisala-xweather-logo-light-example.svg" alt="Vaisala Xweather Logo" width="350"/></p>
 
 ## Quickstart
 
