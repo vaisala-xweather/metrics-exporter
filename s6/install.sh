@@ -76,7 +76,7 @@ EOF
 chmod 700 $S6_DIR/metrics-exporter/run
 
 # Install node exporter and configure it to listen on port 9101
-source "${SCRIPT_DIR}/s6-node-exporter-install.sh"
+source "${SCRIPT_DIR}/install-node-exporter-s6.sh"
 
 echo "✓ Installation complete"
 echo ""
