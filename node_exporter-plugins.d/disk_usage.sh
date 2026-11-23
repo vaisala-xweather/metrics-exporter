@@ -17,8 +17,8 @@ echo '# TYPE node_filesystem_size_bytes gauge'
 for partition in "${PARTITIONS[@]}"; do
     SIZE=$(echo "$NODE_METRICS" | grep -E "^node_filesystem_size_bytes.*mountpoint=\"$partition\"" | awk '{print $2}')
     if [ -n "$SIZE" ]; then
-        DEVICE=$(echo "$NODE_METRICS" | grep -E "^node_filesystem_size_bytes.*mountpoint=\"$partition\"" | grep -oP 'device="[^"]*"')
-        FSTYPE=$(echo "$NODE_METRICS" | grep -E "^node_filesystem_size_bytes.*mountpoint=\"$partition\"" | grep -oP 'fstype="[^"]*"')
+        DEVICE=$(echo "$NODE_METRICS" | grep -E "^node_filesystem_size_bytes.*mountpoint=\"$partition\"" | grep -oE 'device="[^"]*"')
+        FSTYPE=$(echo "$NODE_METRICS" | grep -E "^node_filesystem_size_bytes.*mountpoint=\"$partition\"" | grep -oE 'fstype="[^"]*"')
         echo "node_filesystem_size_bytes{$DEVICE,$FSTYPE,mountpoint=\"$partition\"} $SIZE"
     fi
 done
@@ -31,8 +31,8 @@ echo '# TYPE node_filesystem_avail_bytes gauge'
 for partition in "${PARTITIONS[@]}"; do
     AVAIL=$(echo "$NODE_METRICS" | grep -E "^node_filesystem_avail_bytes.*mountpoint=\"$partition\"" | awk '{print $2}')
     if [ -n "$AVAIL" ]; then
-        DEVICE=$(echo "$NODE_METRICS" | grep -E "^node_filesystem_avail_bytes.*mountpoint=\"$partition\"" | grep -oP 'device="[^"]*"')
-        FSTYPE=$(echo "$NODE_METRICS" | grep -E "^node_filesystem_avail_bytes.*mountpoint=\"$partition\"" | grep -oP 'fstype="[^"]*"')
+        DEVICE=$(echo "$NODE_METRICS" | grep -E "^node_filesystem_avail_bytes.*mountpoint=\"$partition\"" | grep -oE 'device="[^"]*"')
+        FSTYPE=$(echo "$NODE_METRICS" | grep -E "^node_filesystem_avail_bytes.*mountpoint=\"$partition\"" | grep -oE 'fstype="[^"]*"')
         echo "node_filesystem_avail_bytes{$DEVICE,$FSTYPE,mountpoint=\"$partition\"} $AVAIL"
     fi
 done

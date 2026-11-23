@@ -8,7 +8,7 @@ NODE_METRICS=$(cat)
 
 # Get list of all network devices, excluding loopback (lo) and docker interfaces
 DEVICES=$(echo "$NODE_METRICS" | grep -E '^node_network_receive_bytes_total' | \
-    grep -oP 'device="[^"]*"' | cut -d'"' -f2 | \
+    grep -oE 'device="[^"]*"' | cut -d'"' -f2 | \
     grep -v '^lo$' | grep -v '^docker' | grep -v '^br-' | grep -v '^veth' | sort -u)
 
 # Receive bytes
