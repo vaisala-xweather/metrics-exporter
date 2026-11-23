@@ -55,8 +55,14 @@ Alert on these rather than on `up`, which stays `1` while the exporter itself an
 
 If the exporter itself cannot finish (it is killed, or it cannot write the response to `/tmp`), it sends nothing, so
 Prometheus records a failed scrape (`up == 0`) rather than an empty one. node_exporter gets 3 seconds to answer, to stay
-under the 5-second idle timeout socat uses on the s6 path. There is no per-plugin timeout yet: a plugin that hangs still
-holds up the whole scrape.
+under the 5-second idle timeout socat uses on the s6 path.
+
+Each plugin gets 2 seconds by default (`METRICS_EXPORTER_PLUGIN_TIMEOUT`). After that, `timeout` sends `TERM` to the
+plugin's process group, then `KILL` 1 second later. This covers a `df` or `stat` that hangs on a stuck network mount. The
+plugin then reports `metrics_exporter_plugin_success 0`, and a `timed out` warning goes to stderr. The two plugin
+directories run one after the other, so a scrape takes at most about 3 + 2 × (timeout + 1) seconds: 9 s with the
+defaults, under Prometheus' default 10 s scrape timeout. To change it under systemd, run
+`systemctl edit metrics-exporter@.service` and add `Environment=METRICS_EXPORTER_PLUGIN_TIMEOUT=5` under `[Service]`.
 
 ## Tests
 
@@ -66,7 +72,7 @@ holds up the whole scrape.
 
 `tests/test_node_exporter_plugins.sh` checks each bundled plugin against a captured node_exporter fixture.
 `tests/test_metrics_exporter.sh` checks the HTTP response of `metrics-exporter.sh` itself: a full scrape, a failing
-plugin, an unreachable node_exporter, and the bundled plugins with a `grep` that has no `-P` (as busybox on Alpine).
-It points the script at fake plugin directories through the `METRICS_EXPORTER_NODE_EXPORTER_URL`,
-`METRICS_EXPORTER_NODE_EXPORTER_PLUGINS_DIR` and `METRICS_EXPORTER_PLUGINS_DIR` environment variables, which default to
-the installed locations.
+plugin, a plugin that hangs past its timeout, an unreachable node_exporter, and the bundled plugins with a `grep` that
+has no `-P` (as busybox on Alpine). It points the script at fake plugin directories through the
+`METRICS_EXPORTER_NODE_EXPORTER_URL`, `METRICS_EXPORTER_NODE_EXPORTER_PLUGINS_DIR`, `METRICS_EXPORTER_PLUGINS_DIR` and
+`METRICS_EXPORTER_PLUGIN_TIMEOUT` environment variables, which default to the installed locations.

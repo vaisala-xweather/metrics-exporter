@@ -151,6 +151,34 @@ test_label_escaping() {
 		'metrics_exporter_plugin_success{plugin="plugins.d/we\"ird.sh"} 1'
 }
 
+# A hung plugin (e.g. df on a stuck network mount) must not hold up the
+# scrape: it is stopped after METRICS_EXPORTER_PLUGIN_TIMEOUT seconds and
+# reported as failed, and everything else is still published.
+test_hung_plugin_times_out() {
+	echo "Plugin hangs past the timeout..."
+	new_case
+	# A child that hangs: bash only acts on TERM after sleep returns, so the
+	# signal must reach the whole process group.
+	make_plugin "$WORK_DIR/case/plugins.d/hung.sh" 'sleep 30; echo "hung_metric 1"'
+	# A plugin that ignores TERM needs the KILL that follows it.
+	make_plugin "$WORK_DIR/case/plugins.d/stubborn.sh" 'trap "" TERM; sleep 30; echo "stubborn_metric 1"'
+	make_plugin "$WORK_DIR/case/plugins.d/custom.sh" 'echo "custom_metric 2"'
+	local start=$EPOCHSECONDS
+	METRICS_EXPORTER_PLUGIN_TIMEOUT=1 scrape "file://$FIXTURE_FILE"
+	local elapsed=$((EPOCHSECONDS - start))
+
+	check "exits 0" [ "$STATUS" -eq 0 ]
+	check "finishes within timeout + kill grace (took ${elapsed}s)" [ "$elapsed" -le 3 ]
+	check "status line is 200" has_line "$(head -n1 <<< "$RESPONSE")" $'HTTP/1.1 200 OK\r'
+	check "other plugin still published" has_line "$BODY" "custom_metric 2"
+	check "hung.sh success is 0" has_line "$BODY" \
+		'metrics_exporter_plugin_success{plugin="plugins.d/hung.sh"} 0'
+	check "stubborn.sh success is 0" has_line "$BODY" \
+		'metrics_exporter_plugin_success{plugin="plugins.d/stubborn.sh"} 0'
+	check "timeout logged on stderr" grep -q 'hung.sh timed out' <<< "$STDERR"
+	check "Content-Length matches body" content_length_matches
+}
+
 test_sigterm_sends_nothing() {
 	echo "Exporter gets SIGTERM mid-scrape..."
 	new_case
@@ -208,6 +236,7 @@ test_failing_plugin
 test_node_exporter_down
 test_output_without_trailing_newline
 test_label_escaping
+test_hung_plugin_times_out
 test_sigterm_sends_nothing
 test_bundled_plugins_without_grep_P
 echo ""

@@ -7,6 +7,15 @@ set -uo pipefail
 NODE_EXPORTER_URL="${METRICS_EXPORTER_NODE_EXPORTER_URL:-http://localhost:9101/metrics}"
 NODE_EXPORTER_PLUGINS_DIR="${METRICS_EXPORTER_NODE_EXPORTER_PLUGINS_DIR:-/etc/metrics-exporter/node_exporter-plugins.d}"
 PLUGINS_DIR="${METRICS_EXPORTER_PLUGINS_DIR:-/etc/metrics-exporter/plugins.d}"
+PLUGIN_TIMEOUT="${METRICS_EXPORTER_PLUGIN_TIMEOUT:-2}"
+
+# Each plugin gets PLUGIN_TIMEOUT seconds, then TERM to its process group, then
+# KILL 1 second later. busybox timeout before 1.37 has no -k: TERM only there.
+if timeout -k 1 1 true 2> /dev/null; then
+	plugin_timeout=(timeout -k 1 "$PLUGIN_TIMEOUT")
+else
+	plugin_timeout=(timeout "$PLUGIN_TIMEOUT")
+fi
 
 # Consume the HTTP request headers.
 while IFS= read -r line; do
@@ -52,9 +61,9 @@ run_plugin_dir() {
 		[ -f "$plugin" ] && [ -x "$plugin" ] || continue
 		i=${#plugins[@]}
 		if [ -n "$input" ]; then
-			"$plugin" < "$input" > "$tmp_dir/$dir_name.$i.out" &
+			"${plugin_timeout[@]}" "$plugin" < "$input" > "$tmp_dir/$dir_name.$i.out" &
 		else
-			"$plugin" > "$tmp_dir/$dir_name.$i.out" &
+			"${plugin_timeout[@]}" "$plugin" > "$tmp_dir/$dir_name.$i.out" &
 		fi
 		plugins+=("$plugin")
 		pids+=($!)
@@ -72,6 +81,8 @@ run_plugin_dir() {
 			if [ -s "$out" ] && [ -n "$(tail -c1 "$out")" ]; then
 				echo >> "$body" || abort "cannot append output of $plugin"
 			fi
+		elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+			echo "[WARN] plugin $plugin timed out after ${PLUGIN_TIMEOUT}s; output dropped" >&2
 		else
 			echo "[WARN] plugin $plugin exited $rc; output dropped" >&2
 		fi
