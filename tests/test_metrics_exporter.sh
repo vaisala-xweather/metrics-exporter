@@ -179,6 +179,75 @@ test_hung_plugin_times_out() {
 	check "Content-Length matches body" content_length_matches
 }
 
+# busybox timeout (Alpine) signals only the plugin's own pid, not its children.
+# With such a timeout first on PATH, a timed-out plugin must still leave no
+# descendants behind, and must still be logged as timed out.
+test_timeout_kills_descendants_without_gnu_timeout() {
+	echo "Timed-out plugin's children, with a busybox-style timeout..."
+	new_case
+	local shim_dir="$WORK_DIR/busybox-timeout"
+	mkdir -p "$shim_dir"
+	cat > "$shim_dir/timeout" <<-'EOF'
+		#!/bin/bash
+		[ "$1" = -k ] && { echo "timeout: unrecognized option: k" >&2; exit 1; }
+		secs="$1"; shift
+		"$@" & pid=$!
+		( sleep "$secs"; kill -TERM "$pid" ) 2> /dev/null &
+		wait "$pid"
+	EOF
+	chmod +x "$shim_dir/timeout"
+	make_plugin "$WORK_DIR/case/plugins.d/hung.sh" 'sleep 31337; echo "hung_metric 1"'
+	PATH="$shim_dir:$PATH" METRICS_EXPORTER_PLUGIN_TIMEOUT=1 scrape "file://$FIXTURE_FILE"
+	sleep 0.5
+	local left=0
+	pgrep -f 'sleep 31337' > /dev/null && left=1
+	pkill -f 'sleep 31337' 2> /dev/null || true
+
+	check "no plugin descendants left behind" [ "$left" -eq 0 ]
+	check "hung.sh success is 0" has_line "$BODY" \
+		'metrics_exporter_plugin_success{plugin="plugins.d/hung.sh"} 0'
+	check "timeout logged on stderr" grep -q 'hung.sh timed out' <<< "$STDERR"
+}
+
+# plugins.d does not need node_exporter's output, so it runs while node_exporter
+# is fetched and its plugins run: a slow plugin in each costs one wait, not two.
+test_plugin_dirs_run_together() {
+	echo "Slow plugins in both directories..."
+	new_case
+	make_plugin "$WORK_DIR/case/node_exporter-plugins.d/slow.sh" 'cat > /dev/null; sleep 1.5; echo "ne_metric 1"'
+	make_plugin "$WORK_DIR/case/plugins.d/slow.sh" 'sleep 1.5; echo "custom_metric 2"'
+	local start=$EPOCHREALTIME
+	METRICS_EXPORTER_PLUGIN_TIMEOUT=5 scrape "file://$FIXTURE_FILE"
+	local elapsed_ms=$(( (${EPOCHREALTIME/./} - ${start/./}) / 1000 ))
+
+	check "both directories finish in one wait (took ${elapsed_ms}ms)" [ "$elapsed_ms" -lt 2500 ]
+	check "node_exporter plugin output present" has_line "$BODY" "ne_metric 1"
+	check "custom plugin output present" has_line "$BODY" "custom_metric 2"
+	check "node_exporter plugin output comes first" \
+		[ "$(grep -n 'ne_metric 1' <<< "$BODY" | cut -d: -f1)" -lt "$(grep -n 'custom_metric 2' <<< "$BODY" | cut -d: -f1)" ]
+}
+
+# A client that connects and never finishes its request must not hold an
+# exporter (and, under systemd, a service instance) forever.
+test_stalled_request_gives_up() {
+	echo "Client never finishes its request..."
+	new_case
+	local start=$EPOCHSECONDS rc=0
+	# Process substitution: unlike a pipe, bash does not wait for the writer.
+	METRICS_EXPORTER_NODE_EXPORTER_URL="file://$FIXTURE_FILE" \
+		METRICS_EXPORTER_NODE_EXPORTER_PLUGINS_DIR="$WORK_DIR/case/node_exporter-plugins.d" \
+		METRICS_EXPORTER_PLUGINS_DIR="$WORK_DIR/case/plugins.d" \
+		timeout 20 "$EXPORTER" < <(printf 'GET /metrics HTTP/1.1\r\n'; sleep 30) \
+		> "$WORK_DIR/response" 2> "$WORK_DIR/stderr" || rc=$?
+	local elapsed=$((EPOCHSECONDS - start))
+	pkill -f 'sleep 30$' 2> /dev/null || true
+
+	check "gives up within 7s (took ${elapsed}s)" [ "$elapsed" -le 7 ]
+	check "exits non-zero on its own (not killed by the test)" [ "$rc" -ne 0 -a "$rc" -ne 124 ]
+	check "sends no response" [ ! -s "$WORK_DIR/response" ]
+	check "logs the stalled request" grep -q 'request' "$WORK_DIR/stderr"
+}
+
 test_sigterm_sends_nothing() {
 	echo "Exporter gets SIGTERM mid-scrape..."
 	new_case
@@ -237,6 +306,9 @@ test_node_exporter_down
 test_output_without_trailing_newline
 test_label_escaping
 test_hung_plugin_times_out
+test_timeout_kills_descendants_without_gnu_timeout
+test_plugin_dirs_run_together
+test_stalled_request_gives_up
 test_sigterm_sends_nothing
 test_bundled_plugins_without_grep_P
 echo ""

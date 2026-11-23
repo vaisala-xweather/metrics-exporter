@@ -71,7 +71,7 @@ echo "metrics-exporter-log" > $S6_DIR/metrics-exporter/producer-for
 cat << EOF > $S6_DIR/metrics-exporter/run
 #!/bin/sh
 exec 2>&1
-exec /usr/bin/socat -T 5 TCP-LISTEN:9100,reuseaddr,fork EXEC:/opt/metrics-exporter/metrics-exporter.sh
+exec /usr/bin/socat -T 10 TCP-LISTEN:9100,reuseaddr,fork EXEC:/opt/metrics-exporter/metrics-exporter.sh
 EOF
 chmod 700 $S6_DIR/metrics-exporter/run
 

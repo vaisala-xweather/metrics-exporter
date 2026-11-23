@@ -7,3 +7,6 @@ ExecStart=/opt/metrics-exporter/metrics-exporter.sh
 StandardInput=socket
 StandardOutput=socket
 StandardError=journal
+# Backstop: metrics-exporter.sh bounds its own run to about 6 s, and
+# Prometheus gives up after its 10 s scrape timeout anyway.
+RuntimeMaxSec=15
