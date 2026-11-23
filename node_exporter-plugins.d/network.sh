@@ -1,72 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 # Network Plugin
-# Outputs network stats (rx/tx bytes, errors, drops) for non-loopback and non-docker interfaces
+# Outputs rx/tx bytes, errors and drops per network device, leaving out
+# loopback (lo) and container interfaces (docker*, br-*, veth*). Reads
+# node_exporter metrics on stdin. A host with no other interfaces gets the
+# HELP/TYPE lines and no samples.
 
-# Read metrics from stdin
-NODE_METRICS=$(cat)
-
-# Get list of all network devices, excluding loopback (lo) and docker interfaces
-DEVICES=$(echo "$NODE_METRICS" | grep -E '^node_network_receive_bytes_total' | \
-    grep -oE 'device="[^"]*"' | cut -d'"' -f2 | \
-    grep -v '^lo$' | grep -v '^docker' | grep -v '^br-' | grep -v '^veth' | sort -u)
-
-# Receive bytes
-echo '# HELP node_network_receive_bytes_total Network device statistic receive_bytes.'
-echo '# TYPE node_network_receive_bytes_total counter'
-for dev in $DEVICES; do
-    VALUE=$(echo "$NODE_METRICS" | grep -E "^node_network_receive_bytes_total.*device=\"$dev\"" | awk '{print $2}')
-    if [ -n "$VALUE" ]; then
-        echo "node_network_receive_bytes_total{device=\"$dev\"} $VALUE"
-    fi
-done
-
-# Transmit bytes
-echo '# HELP node_network_transmit_bytes_total Network device statistic transmit_bytes.'
-echo '# TYPE node_network_transmit_bytes_total counter'
-for dev in $DEVICES; do
-    VALUE=$(echo "$NODE_METRICS" | grep -E "^node_network_transmit_bytes_total.*device=\"$dev\"" | awk '{print $2}')
-    if [ -n "$VALUE" ]; then
-        echo "node_network_transmit_bytes_total{device=\"$dev\"} $VALUE"
-    fi
-done
-
-# Receive errors
-echo '# HELP node_network_receive_errs_total Network device statistic receive_errs.'
-echo '# TYPE node_network_receive_errs_total counter'
-for dev in $DEVICES; do
-    VALUE=$(echo "$NODE_METRICS" | grep -E "^node_network_receive_errs_total.*device=\"$dev\"" | awk '{print $2}')
-    if [ -n "$VALUE" ]; then
-        echo "node_network_receive_errs_total{device=\"$dev\"} $VALUE"
-    fi
-done
-
-# Transmit errors
-echo '# HELP node_network_transmit_errs_total Network device statistic transmit_errs.'
-echo '# TYPE node_network_transmit_errs_total counter'
-for dev in $DEVICES; do
-    VALUE=$(echo "$NODE_METRICS" | grep -E "^node_network_transmit_errs_total.*device=\"$dev\"" | awk '{print $2}')
-    if [ -n "$VALUE" ]; then
-        echo "node_network_transmit_errs_total{device=\"$dev\"} $VALUE"
-    fi
-done
-
-# Receive drops
-echo '# HELP node_network_receive_drop_total Network device statistic receive_drop.'
-echo '# TYPE node_network_receive_drop_total counter'
-for dev in $DEVICES; do
-    VALUE=$(echo "$NODE_METRICS" | grep -E "^node_network_receive_drop_total.*device=\"$dev\"" | awk '{print $2}')
-    if [ -n "$VALUE" ]; then
-        echo "node_network_receive_drop_total{device=\"$dev\"} $VALUE"
-    fi
-done
-
-# Transmit drops
-echo '# HELP node_network_transmit_drop_total Network device statistic transmit_drop.'
-echo '# TYPE node_network_transmit_drop_total counter'
-for dev in $DEVICES; do
-    VALUE=$(echo "$NODE_METRICS" | grep -E "^node_network_transmit_drop_total.*device=\"$dev\"" | awk '{print $2}')
-    if [ -n "$VALUE" ]; then
-        echo "node_network_transmit_drop_total{device=\"$dev\"} $VALUE"
-    fi
-done
+awk '
+/^node_network_(receive|transmit)_(bytes|errs|drop)_total\{/ && match($0, /[{,]device="[^"]*"/) {
+	dev = substr($0, RSTART + 9, RLENGTH - 10)
+	if (dev == "lo" || dev ~ /^(docker|br-|veth)/) next
+	name = substr($0, 1, index($0, "{") - 1)
+	value[name, dev] = $NF
+	# Devices in the order node_exporter lists them (sorted).
+	if (name == "node_network_receive_bytes_total" && !(dev in seen)) {
+		seen[dev] = 1
+		devs[++ndev] = dev
+	}
+}
+END {
+	n = split("receive_bytes transmit_bytes receive_errs transmit_errs receive_drop transmit_drop", stats, " ")
+	for (i = 1; i <= n; i++) {
+		name = "node_network_" stats[i] "_total"
+		print "# HELP " name " Network device statistic " stats[i] "."
+		print "# TYPE " name " counter"
+		for (d = 1; d <= ndev; d++)
+			if ((name, devs[d]) in value)
+				printf "%s{device=\"%s\"} %s\n", name, devs[d], value[name, devs[d]]
+	}
+}'

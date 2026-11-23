@@ -10,3 +10,7 @@ Each of these plugins will receive `node_exporter` data via stdin. They should r
 1. Load Average - output load average and normalized load average (per CPU)
 1. Memory - output memory usage (used, free, cached, buffers, swap)
 1. Network - output network stats (rx/tx bytes, errors, drops) for non-loopback and non-docker interfaces
+
+Each plugin reads its input in one `awk` pass and always exits 0. A metric node_exporter does not report (for example,
+the cpu collector is off, or there is no swap) is left out of the output rather than reported as 0. When node_exporter
+reports more than one filesystem on a mount point, Disk Usage reports only the first, so each series appears once.
