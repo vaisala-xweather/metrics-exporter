@@ -14,6 +14,7 @@ If you're running on a system with `systemd`:
 
 ```bash
 git clone https://github.com/vaisala-xweather/metrics-exporter.git
+# node_exporter must listen on port 9101, e.g. --web.listen-address=127.0.0.1:9101
 sudo ./metrics-exporter/install.sh
 
 # Test
