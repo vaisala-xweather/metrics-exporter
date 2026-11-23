@@ -39,3 +39,34 @@ curl http://localhost:9100/metrics
 1. The OpenMetrics formatted response is sent back to the client
 1. Any logs or errors sent from `metrics-exporter.sh` over stderr are sent to `/var/log/metrics-exporter/` via s6-overlay's logutil-service
 1. After the response is sent, the script exits and the socat child process terminates
+
+## Self-monitoring metrics
+
+The exporter builds the whole response before it sends any headers. When a plugin fails or node_exporter is
+unreachable, the scrape still returns `200 OK` with everything else in it, and reports what failed with these metrics:
+
+| Metric | Meaning |
+| --- | --- |
+| `metrics_exporter_node_exporter_up` | `1` if node_exporter answered on `localhost:9101`, `0` if not. When `0`, the node_exporter plugins are skipped and `plugins.d` still runs. |
+| `metrics_exporter_plugin_success{plugin="<dir>/<file>"}` | `1` if the plugin exited 0. `0` if it failed: its output is dropped and a `[WARN]` line goes to stderr. |
+
+Alert on these rather than on `up`, which stays `1` while the exporter itself answers. For example:
+`metrics_exporter_plugin_success == 0 or metrics_exporter_node_exporter_up == 0`.
+
+If the exporter itself cannot finish (it is killed, or it cannot write the response to `/tmp`), it sends nothing, so
+Prometheus records a failed scrape (`up == 0`) rather than an empty one. node_exporter gets 3 seconds to answer, to stay
+under the 5-second idle timeout socat uses on the s6 path. There is no per-plugin timeout yet: a plugin that hangs still
+holds up the whole scrape.
+
+## Tests
+
+```bash
+./test.sh
+```
+
+`tests/test_node_exporter_plugins.sh` checks each bundled plugin against a captured node_exporter fixture.
+`tests/test_metrics_exporter.sh` checks the HTTP response of `metrics-exporter.sh` itself: a full scrape, a failing
+plugin, an unreachable node_exporter, and the bundled plugins with a `grep` that has no `-P` (as busybox on Alpine).
+It points the script at fake plugin directories through the `METRICS_EXPORTER_NODE_EXPORTER_URL`,
+`METRICS_EXPORTER_NODE_EXPORTER_PLUGINS_DIR` and `METRICS_EXPORTER_PLUGINS_DIR` environment variables, which default to
+the installed locations.

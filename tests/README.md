@@ -8,15 +8,16 @@ This directory contains tests for the node_exporter plugins.
 tests/
 ├── fixtures/
 │   └── node_exporter.example.txt    # Sample node_exporter metrics data
-└── test_node_exporter_plugins.sh    # Test runner
+├── test_metrics_exporter.sh         # Tests for metrics-exporter.sh (HTTP response, failures, signals, busybox grep)
+└── test_node_exporter_plugins.sh    # Tests for each node_exporter plugin
 ```
 
 ## Running Tests
 
-Execute the test suite:
+Run every suite from the repo root:
 
 ```bash
-./test_node_exporter_plugins.sh
+./test.sh
 ```
 
 ## What Gets Tested
