@@ -29,6 +29,10 @@ For each plugin in `node_exporter-plugins.d/`, the test suite verifies:
 3. **Valid Prometheus format**: Output contains proper `# HELP` and `# TYPE` comments and metric lines
 4. **Contains expected metrics**: Plugin outputs the expected metric names
 
+Every plugin is also run on empty input and on input without the metrics it reads: it must exit 0 and print a valid
+exposition (every sample line well formed, no series twice). Further cases cover two filesystems on `/`, missing memory
+metrics, load averages with no CPU metrics, a host with only `lo`, and a device name with a `.` in it.
+
 ### Plugins Tested
 
 - **cpu.sh**: CPU usage metrics aggregated across all cores

@@ -285,6 +285,88 @@ test_network_plugin() {
     print_result "$test_name - contains all network metrics" "PASS"
 }
 
+# True if every sample line is "name[{labels}] value" and no series repeats.
+# Prometheus rejects the whole scrape when either rule breaks.
+valid_exposition() {
+    local samples
+    samples="$(grep -v '^#' <<< "$1" | grep -v '^$' || true)"
+    [ -z "$samples" ] && return 0
+    grep -qvE '^[a-zA-Z_:][a-zA-Z0-9_:]*(\{[^}]*\})? [^ ]+$' <<< "$samples" && return 1
+    [ -z "$(awk '{$NF=""; print}' <<< "$samples" | sort | uniq -d)" ]
+}
+
+# Run a plugin on given input. Sets OUT and RC.
+run_on() {
+    RC=0
+    OUT="$("$PLUGINS_DIR/$1" <<< "$2" 2>/dev/null)" || RC=$?
+}
+
+check_case() {
+    local name="$1"
+    shift
+    if "$@"; then print_result "$name" "PASS"; else print_result "$name" "FAIL"; fi
+}
+
+# Every bundled plugin on the full fixture, on empty input, and on input that
+# lacks the metrics it reads: always exit 0 with a valid exposition.
+test_all_plugins_partial_input() {
+    local plugin name
+    for plugin in "$PLUGINS_DIR"/*.sh; do
+        name="$(basename "$plugin")"
+        run_on "$name" "$(cat "$FIXTURE_FILE")"
+        check_case "$name - fixture output is a valid exposition" valid_exposition "$OUT"
+        run_on "$name" ""
+        check_case "$name - empty input exits 0" [ "$RC" -eq 0 ]
+        check_case "$name - empty input gives a valid exposition" valid_exposition "$OUT"
+        run_on "$name" 'node_unrelated_metric 1'
+        check_case "$name - unrelated input exits 0" [ "$RC" -eq 0 ]
+    done
+}
+
+test_disk_usage_duplicate_mountpoint() {
+    run_on disk_usage.sh 'node_filesystem_size_bytes{device="overlay",fstype="overlay",mountpoint="/"} 100
+node_filesystem_size_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/"} 200
+node_filesystem_avail_bytes{device="overlay",fstype="overlay",mountpoint="/"} 25
+node_filesystem_avail_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/"} 50'
+    check_case "disk_usage.sh - two / mounts exit 0" [ "$RC" -eq 0 ]
+    check_case "disk_usage.sh - two / mounts give a valid exposition" valid_exposition "$OUT"
+    check_case "disk_usage.sh - first / mount is reported" grep -qxF \
+        'node_filesystem_size_bytes{device="overlay",fstype="overlay",mountpoint="/"} 100' <<< "$OUT"
+    check_case "disk_usage.sh - usage percent from the same mount" grep -qxF \
+        'node_filesystem_usage_percent{mountpoint="/"} 75.00' <<< "$OUT"
+}
+
+test_memory_missing_metric() {
+    run_on memory.sh 'node_memory_MemTotal_bytes 1000
+node_memory_MemFree_bytes 400'
+    check_case "memory.sh - missing metrics exit 0" [ "$RC" -eq 0 ]
+    check_case "memory.sh - present metric still reported" grep -qxF 'node_memory_MemTotal_bytes 1000' <<< "$OUT"
+    check_case "memory.sh - missing metric left out, not faked as 0" \
+        bash -c '! grep -q "^node_memory_MemAvailable_bytes" <<< "$1"' _ "$OUT"
+}
+
+test_load_average_without_cpu() {
+    run_on load_average.sh 'node_load1 0.5
+node_load5 0.25
+node_load15 0.1'
+    check_case "load_average.sh - no cpu metrics exits 0" [ "$RC" -eq 0 ]
+    check_case "load_average.sh - load still reported" grep -qxF 'node_load1 0.5' <<< "$OUT"
+    check_case "load_average.sh - no normalized load without a CPU count" \
+        bash -c '! grep -q "^node_load_normalized" <<< "$1"' _ "$OUT"
+}
+
+test_network_edge_cases() {
+    run_on network.sh 'node_network_receive_bytes_total{device="lo"} 10'
+    check_case "network.sh - only lo exits 0" [ "$RC" -eq 0 ]
+    check_case "network.sh - only lo reports no device" bash -c '! grep -q "device=" <<< "$1"' _ "$OUT"
+
+    run_on network.sh 'node_network_receive_bytes_total{device="eth0.100"} 1
+node_network_receive_bytes_total{device="eth0x100"} 2'
+    check_case "network.sh - dotted device name gives a valid exposition" valid_exposition "$OUT"
+    check_case "network.sh - dotted device keeps its own value" grep -qxF \
+        'node_network_receive_bytes_total{device="eth0.100"} 1' <<< "$OUT"
+}
+
 # Main test execution
 main() {
     echo "========================================"
@@ -317,6 +399,14 @@ main() {
 
     echo "Testing network.sh..."
     test_network_plugin
+    echo ""
+
+    echo "Testing partial and unusual input..."
+    test_all_plugins_partial_input
+    test_disk_usage_duplicate_mountpoint
+    test_memory_missing_metric
+    test_load_average_without_cpu
+    test_network_edge_cases
     echo ""
 
     # Print summary

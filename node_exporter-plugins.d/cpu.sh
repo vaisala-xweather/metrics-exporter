@@ -1,33 +1,28 @@
 #!/bin/bash
 set -euo pipefail
 # CPU Plugin
-# Outputs aggregated CPU usage by type (user, system, idle, iowait) across all cores
+# Outputs CPU seconds per mode (user, system, idle, iowait, ...) summed across
+# all cores, and the number of cores. Reads node_exporter metrics on stdin.
+# A mode with no samples, or the core count when node_exporter's cpu collector
+# is off, is left out rather than reported as 0.
+# Prometheus computes usage percentages from these counters with rate().
 
-# Read metrics from stdin
-NODE_METRICS=$(cat)
-
-# CPU modes to track
-MODES=("user" "system" "idle" "iowait" "nice" "irq" "softirq" "steal")
-
-# Output HELP and TYPE
-echo '# HELP node_cpu_seconds_total Seconds the CPUs spent in each mode.'
-echo '# TYPE node_cpu_seconds_total counter'
-
-# For each mode, sum across all CPUs
-for mode in "${MODES[@]}"; do
-    TOTAL=$(echo "$NODE_METRICS" | grep -E "^node_cpu_seconds_total.*mode=\"$mode\"" | \
-        awk '{sum += $2} END {printf "%.2f", sum}')
-
-    if [ -n "$TOTAL" ] && [ "$TOTAL" != "" ]; then
-        echo "node_cpu_seconds_total{mode=\"$mode\"} $TOTAL"
-    fi
-done
-
-# Calculate CPU usage percentages (requires two samples, so we'll provide raw counters)
-# The monitoring system (like Prometheus) will use rate() to calculate percentages
-
-# Output CPU count for reference
-CPU_COUNT=$(echo "$NODE_METRICS" | grep -E '^node_cpu_seconds_total' | grep 'mode="idle"' | wc -l)
-echo "# HELP node_cpu_count Number of CPU cores."
-echo "# TYPE node_cpu_count gauge"
-echo "node_cpu_count $CPU_COUNT"
+awk '
+/^node_cpu_seconds_total\{/ && match($0, /[{,]mode="[^"]*"/) {
+	mode = substr($0, RSTART + 7, RLENGTH - 8)
+	sum[mode] += $NF
+	if (mode == "idle") cpus++
+}
+END {
+	n = split("user system idle iowait nice irq softirq steal", modes, " ")
+	print "# HELP node_cpu_seconds_total Seconds the CPUs spent in each mode."
+	print "# TYPE node_cpu_seconds_total counter"
+	for (i = 1; i <= n; i++)
+		if (modes[i] in sum)
+			printf "node_cpu_seconds_total{mode=\"%s\"} %.2f\n", modes[i], sum[modes[i]]
+	if (cpus > 0) {
+		print "# HELP node_cpu_count Number of CPU cores."
+		print "# TYPE node_cpu_count gauge"
+		print "node_cpu_count " cpus
+	}
+}'
