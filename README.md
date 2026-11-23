@@ -26,7 +26,7 @@ curl http://localhost:9100/metrics
 1. When a connection arrives, systemd spawns an instance of the `.service` unit
 1. The service runs `metrics-exporter.sh` with stdin/stdout connected to the socket
     1. The service reads once from node_exporter on localhost:9101 and sends that output to be filtered by each plugin in `/etc/metrics-exporter/node_exporter-plugins.d/`. Each plugin reads from stdin and outputs its own metrics to stdout.
-    1. Next, the service runs each script in `/etc/metrics-exporter/plugins.d/`, appending the metrics to stdin for each script to process and output its own metrics to stdout. See plugins.d.examples for some sample scripts.
+    1. At the same time, the service runs each script in `/etc/metrics-exporter/plugins.d/`. These scripts get no input on stdin; each one outputs its own metrics to stdout. See plugins.d.examples for some sample scripts.
 1. The OpenMetrics formatted response is sent back to the client
 1. After the response is sent, the script exits and the service instance terminates
 
@@ -54,14 +54,16 @@ Alert on these rather than on `up`, which stays `1` while the exporter itself an
 `metrics_exporter_plugin_success == 0 or metrics_exporter_node_exporter_up == 0`.
 
 If the exporter itself cannot finish (it is killed, or it cannot write the response to `/tmp`), it sends nothing, so
-Prometheus records a failed scrape (`up == 0`) rather than an empty one. node_exporter gets 3 seconds to answer, to stay
-under the 5-second idle timeout socat uses on the s6 path.
+Prometheus records a failed scrape (`up == 0`) rather than an empty one. The same goes for a client that does not finish
+its HTTP request within 5 seconds.
 
-Each plugin gets 2 seconds by default (`METRICS_EXPORTER_PLUGIN_TIMEOUT`). After that, `timeout` sends `TERM` to the
-plugin's process group, then `KILL` 1 second later. This covers a `df` or `stat` that hangs on a stuck network mount. The
-plugin then reports `metrics_exporter_plugin_success 0`, and a `timed out` warning goes to stderr. The two plugin
-directories run one after the other, so a scrape takes at most about 3 + 2 × (timeout + 1) seconds: 9 s with the
-defaults, under Prometheus' default 10 s scrape timeout. To change it under systemd, run
+Each plugin gets 2 seconds by default (`METRICS_EXPORTER_PLUGIN_TIMEOUT`). After that, the exporter sends `TERM` to the
+plugin's process group (each plugin runs under `setsid`), then `KILL` 1 second later, so anything the plugin started is
+stopped too. This covers a `df` or `stat` that hangs on a stuck network mount. The plugin then reports
+`metrics_exporter_plugin_success 0`, and a `timed out` warning goes to stderr. node_exporter gets 3 seconds to answer.
+`plugins.d` runs while node_exporter is fetched and its plugins run, so a scrape takes at most about
+3 + timeout + 1 seconds: 6 s with the defaults. That is under Prometheus' default 10 s scrape timeout and the 10 s idle
+timeout socat uses on the s6 path. To change the plugin timeout under systemd, run
 `systemctl edit metrics-exporter@.service` and add `Environment=METRICS_EXPORTER_PLUGIN_TIMEOUT=5` under `[Service]`.
 
 ## Tests
@@ -72,7 +74,8 @@ defaults, under Prometheus' default 10 s scrape timeout. To change it under syst
 
 `tests/test_node_exporter_plugins.sh` checks each bundled plugin against a captured node_exporter fixture.
 `tests/test_metrics_exporter.sh` checks the HTTP response of `metrics-exporter.sh` itself: a full scrape, a failing
-plugin, a plugin that hangs past its timeout, an unreachable node_exporter, and the bundled plugins with a `grep` that
-has no `-P` (as busybox on Alpine). It points the script at fake plugin directories through the
+plugin, a plugin that hangs past its timeout (also with a busybox-style `timeout`), slow plugins in both directories, a
+client that never finishes its request, an unreachable node_exporter, and the bundled plugins with a `grep` that has no
+`-P` (as busybox on Alpine). It points the script at fake plugin directories through the
 `METRICS_EXPORTER_NODE_EXPORTER_URL`, `METRICS_EXPORTER_NODE_EXPORTER_PLUGINS_DIR`, `METRICS_EXPORTER_PLUGINS_DIR` and
 `METRICS_EXPORTER_PLUGIN_TIMEOUT` environment variables, which default to the installed locations.
