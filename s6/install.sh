@@ -12,10 +12,12 @@ INSTALL_DIR="/opt/metrics-exporter"
 
 echo "Installing metrics exporter..."
 # Check for required binaries
-if ! command -v socat &> /dev/null; then
-	echo "Error: socat is not installed. Please install socat and try again."
-	exit 1
-fi
+for cmd in socat curl; do
+	if ! command -v "$cmd" &> /dev/null; then
+		echo "Error: $cmd is not installed. Please install $cmd and try again."
+		exit 1
+	fi
+done
 if [ ! -d "/etc/s6-overlay" ]; then
 	echo "Error: s6-overlay is not installed. Please install s6-overlay and try again."
 	exit 1
@@ -43,7 +45,7 @@ touch $S6_DIR/metrics-exporter-log-prepare/dependencies.d/base
 echo "oneshot" > $S6_DIR/metrics-exporter-log-prepare/type
 cat << EOF > $S6_DIR/metrics-exporter-log-prepare/up
 if { mkdir -p /var/log/metrics-exporter }
-if { chown nobody:nobody /var/log/metrics-exporter }
+if { chown nobody /var/log/metrics-exporter }
 chmod 02755 /var/log/metrics-exporter
 EOF
 

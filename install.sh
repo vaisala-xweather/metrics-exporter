@@ -10,6 +10,14 @@ INSTALL_DIR="/opt/metrics-exporter"
 
 echo "Installing metrics exporter..."
 
+# The exporter takes port 9100, node_exporter's default, and reads
+# node_exporter on 9101. Fail early if something else already holds 9100.
+if ! systemctl is-active --quiet metrics-exporter.socket && [ -n "$(ss -Hltn 'sport = :9100')" ]; then
+	echo "Error: port 9100 is already in use, probably by node_exporter." >&2
+	echo "Move node_exporter to port 9101 (--web.listen-address=127.0.0.1:9101) and run this again." >&2
+	exit 1
+fi
+
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp "$SCRIPT_DIR/metrics-exporter.sh" "$INSTALL_DIR/metrics-exporter.sh"
 sudo chmod +x "$INSTALL_DIR/metrics-exporter.sh"
@@ -26,6 +34,12 @@ sudo systemctl daemon-reload
 
 sudo systemctl enable metrics-exporter.socket
 sudo systemctl start metrics-exporter.socket
+
+if ! curl -sf --max-time 3 -o /dev/null http://localhost:9101/metrics; then
+	echo "[WARN] node_exporter is not answering on localhost:9101." >&2
+	echo "       Until it does, metrics_exporter_node_exporter_up is 0 and the node_exporter plugins do not run." >&2
+	echo "       Start node_exporter with --web.listen-address=127.0.0.1:9101." >&2
+fi
 
 echo "✓ Installation complete"
 echo ""
