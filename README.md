@@ -39,3 +39,28 @@ curl http://localhost:9100/metrics
 1. The OpenMetrics formatted response is sent back to the client
 1. Any logs or errors sent from `metrics-exporter.sh` over stderr are sent to `/var/log/metrics-exporter/` via s6-overlay's logutil-service
 1. After the response is sent, the script exits and the socat child process terminates
+
+## Self-monitoring metrics
+
+Every scrape returns `200 OK`, even when something fails. The exporter builds the whole response before it sends any
+headers, so one broken part never empties or cuts short the rest. It reports what failed with these metrics:
+
+| Metric | Meaning |
+| --- | --- |
+| `metrics_exporter_node_exporter_up` | `1` if node_exporter answered on `localhost:9101`, `0` if not. When `0`, the node_exporter plugins are skipped and `plugins.d` still runs. |
+| `metrics_exporter_plugin_success{plugin="<dir>/<file>"}` | `1` if the plugin exited 0. `0` if it failed: its output is dropped and a `[WARN]` line goes to stderr. |
+
+Alert on these rather than on `up`, which stays `1` while the exporter itself answers. For example:
+`metrics_exporter_plugin_success == 0 or metrics_exporter_node_exporter_up == 0`.
+
+## Tests
+
+```bash
+./test.sh
+```
+
+`tests/test_node_exporter_plugins.sh` checks each bundled plugin against a captured node_exporter fixture.
+`tests/test_metrics_exporter.sh` checks the HTTP response of `metrics-exporter.sh` itself: a full scrape, a failing
+plugin, an unreachable node_exporter, and the bundled plugins with a `grep` that has no `-P` (as busybox on Alpine).
+It points the script at fake plugin directories through the `NODE_EXPORTER_URL`, `NODE_EXPORTER_PLUGINS_DIR` and
+`PLUGINS_DIR` environment variables, which default to the installed locations.
