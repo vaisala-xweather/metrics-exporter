@@ -42,8 +42,8 @@ curl http://localhost:9100/metrics
 
 ## Self-monitoring metrics
 
-Every scrape returns `200 OK`, even when something fails. The exporter builds the whole response before it sends any
-headers, so one broken part never empties or cuts short the rest. It reports what failed with these metrics:
+The exporter builds the whole response before it sends any headers. When a plugin fails or node_exporter is
+unreachable, the scrape still returns `200 OK` with everything else in it, and reports what failed with these metrics:
 
 | Metric | Meaning |
 | --- | --- |
@@ -52,6 +52,11 @@ headers, so one broken part never empties or cuts short the rest. It reports wha
 
 Alert on these rather than on `up`, which stays `1` while the exporter itself answers. For example:
 `metrics_exporter_plugin_success == 0 or metrics_exporter_node_exporter_up == 0`.
+
+If the exporter itself cannot finish (it is killed, or it cannot write the response to `/tmp`), it sends nothing, so
+Prometheus records a failed scrape (`up == 0`) rather than an empty one. node_exporter gets 3 seconds to answer, to stay
+under the 5-second idle timeout socat uses on the s6 path. There is no per-plugin timeout yet: a plugin that hangs still
+holds up the whole scrape.
 
 ## Tests
 
@@ -62,5 +67,6 @@ Alert on these rather than on `up`, which stays `1` while the exporter itself an
 `tests/test_node_exporter_plugins.sh` checks each bundled plugin against a captured node_exporter fixture.
 `tests/test_metrics_exporter.sh` checks the HTTP response of `metrics-exporter.sh` itself: a full scrape, a failing
 plugin, an unreachable node_exporter, and the bundled plugins with a `grep` that has no `-P` (as busybox on Alpine).
-It points the script at fake plugin directories through the `NODE_EXPORTER_URL`, `NODE_EXPORTER_PLUGINS_DIR` and
-`PLUGINS_DIR` environment variables, which default to the installed locations.
+It points the script at fake plugin directories through the `METRICS_EXPORTER_NODE_EXPORTER_URL`,
+`METRICS_EXPORTER_NODE_EXPORTER_PLUGINS_DIR` and `METRICS_EXPORTER_PLUGINS_DIR` environment variables, which default to
+the installed locations.

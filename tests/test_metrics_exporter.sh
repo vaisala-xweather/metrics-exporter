@@ -44,9 +44,9 @@ scrape() {
 	local url="$1"
 	STATUS=0
 	printf 'GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n' |
-		NODE_EXPORTER_URL="$url" \
-		NODE_EXPORTER_PLUGINS_DIR="$WORK_DIR/case/node_exporter-plugins.d" \
-		PLUGINS_DIR="$WORK_DIR/case/plugins.d" \
+		METRICS_EXPORTER_NODE_EXPORTER_URL="$url" \
+		METRICS_EXPORTER_NODE_EXPORTER_PLUGINS_DIR="$WORK_DIR/case/node_exporter-plugins.d" \
+		METRICS_EXPORTER_PLUGINS_DIR="$WORK_DIR/case/plugins.d" \
 		"$EXPORTER" > "$WORK_DIR/response" 2> "$WORK_DIR/stderr" || STATUS=$?
 	RESPONSE="$(cat "$WORK_DIR/response")"
 	STDERR="$(cat "$WORK_DIR/stderr")"
@@ -128,6 +128,47 @@ test_node_exporter_down() {
 	check "Content-Length matches body" content_length_matches
 }
 
+test_output_without_trailing_newline() {
+	echo "Plugin output without a trailing newline..."
+	new_case
+	make_plugin "$WORK_DIR/case/plugins.d/a.sh" "printf 'no_newline_metric 1'"
+	make_plugin "$WORK_DIR/case/plugins.d/b.sh" 'echo "next_metric 2"'
+	scrape "file://$FIXTURE_FILE"
+
+	check "unterminated line stays on its own line" has_line "$BODY" "no_newline_metric 1"
+	check "next plugin starts on a new line" has_line "$BODY" "next_metric 2"
+	check "exporter metrics start on a new line" has_line "$BODY" \
+		'# HELP metrics_exporter_node_exporter_up Whether node_exporter answered this scrape (1) or not (0).'
+}
+
+test_label_escaping() {
+	echo "Plugin filename that needs escaping..."
+	new_case
+	make_plugin "$WORK_DIR/case/plugins.d/we\"ird.sh" 'echo "weird_metric 1"'
+	scrape "file://$FIXTURE_FILE"
+
+	check "quote in plugin label is escaped" has_line "$BODY" \
+		'metrics_exporter_plugin_success{plugin="plugins.d/we\"ird.sh"} 1'
+}
+
+test_sigterm_sends_nothing() {
+	echo "Exporter gets SIGTERM mid-scrape..."
+	new_case
+	make_plugin "$WORK_DIR/case/plugins.d/slow.sh" 'sleep 3; echo "slow_metric 1"'
+	printf 'GET /metrics HTTP/1.1\r\n\r\n' > "$WORK_DIR/request"
+	METRICS_EXPORTER_NODE_EXPORTER_URL="file://$FIXTURE_FILE" \
+		METRICS_EXPORTER_NODE_EXPORTER_PLUGINS_DIR="$WORK_DIR/case/node_exporter-plugins.d" \
+		METRICS_EXPORTER_PLUGINS_DIR="$WORK_DIR/case/plugins.d" \
+		"$EXPORTER" < "$WORK_DIR/request" > "$WORK_DIR/response" 2> /dev/null &
+	local pid=$! rc=0
+	sleep 0.5
+	kill -TERM "$pid"
+	wait "$pid" || rc=$?
+
+	check "exits non-zero" [ "$rc" -ne 0 ]
+	check "sends no response at all" [ ! -s "$WORK_DIR/response" ]
+}
+
 # busybox grep (Alpine, the s6/Docker path) has no -P. Put a grep first on
 # PATH that rejects -P the way busybox does, and run the bundled plugins.
 test_bundled_plugins_without_grep_P() {
@@ -165,6 +206,9 @@ echo "========================================"
 test_happy_path
 test_failing_plugin
 test_node_exporter_down
+test_output_without_trailing_newline
+test_label_escaping
+test_sigterm_sends_nothing
 test_bundled_plugins_without_grep_P
 echo ""
 echo "Total: $TESTS_RUN, failed: $TESTS_FAILED"
